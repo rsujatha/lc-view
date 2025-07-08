@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Simulated Large Point Cloud Viewer</title>
+    <title>External File Point Cloud Viewer</title>
     <!-- Three.js library -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <!-- OrbitControls for camera interaction -->
@@ -57,6 +57,7 @@
             z-index: 100;
             flex-direction: column;
             border-radius: 10px;
+            text-align: center;
         }
         .spinner {
             border: 8px solid #f3f3f3;
@@ -71,32 +72,67 @@
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+        #error-message {
+            color: #ff4d4d;
+            font-weight: bold;
+            margin-top: 10px;
+            display: none; /* Hidden by default */
+        }
     </style>
 </head>
 <body>
     <div id="loading-overlay">
         <div class="spinner"></div>
-        <p>Generating points... This might take a moment.</p>
+        <p id="loading-text">Loading point data...</p>
     </div>
 
     <div id="info-box">
-        <h3>Simulated 3D Point Cloud Viewer</h3>
-        <p>This demonstration shows real-time rendering of a large *simulated* point cloud using Three.js.</p>
-        <p><strong>Important:</strong> Directly processing 40GB of raw data in a browser is not feasible. Real-world solutions require extensive offline pre-processing (downsampling, LOD, or Gaussian Splatting training) on powerful machines.</p>
+        <h3>External File Point Cloud Viewer</h3>
+        <p>This viewer loads `x,y,z` point data automatically from `points.xyz` in the same repository.</p>
+        <p><strong>File Format:</strong> Each line should contain `x y z` (space or comma separated).</p>
+        <p><strong>Important:</strong> For 40GB datasets, reading directly in the browser is **not feasible** and will likely crash. This method is suitable for files up to a few hundred MBs. Real-world 40GB solutions require **offline pre-processing** and server-side streaming.</p>
         <p>You can drag to rotate and scroll to zoom the point cloud.</p>
-        <p>Number of points: <span id="point-count"></span></p>
+        <p>Number of points: <span id="point-count">0</span></p>
     </div>
 
     <script>
         let scene, camera, renderer, controls, points;
-        const NUM_POINTS = 1000000; // Simulating 1 million points for demonstration
-        const MAX_COORD = 50; // Max coordinate value for generated points
+        let currentNumPoints = 0;
+        let maxCoord = 1; // Will be updated based on loaded data
+        const DATA_FILE_PATH = 'points.xyz'; // The name of your data file in the same repository
+
+        // Function to set loading overlay text and visibility
+        function setLoading(isLoading, text = "Loading...") {
+            const overlay = document.getElementById('loading-overlay');
+            const loadingText = document.getElementById('loading-text');
+            if (isLoading) {
+                loadingText.innerText = text;
+                overlay.style.display = 'flex';
+            } else {
+                overlay.style.display = 'none';
+            }
+        }
+
+        // Function to display error message
+        function showErrorMessage(message) {
+            const errorDiv = document.getElementById('error-message');
+            // Add error message div if it doesn't exist
+            if (!errorDiv) {
+                const newErrorDiv = document.createElement('div');
+                newErrorDiv.id = 'error-message';
+                document.body.appendChild(newErrorDiv);
+            }
+            document.getElementById('error-message').innerText = message;
+            document.getElementById('error-message').style.display = 'block';
+            setTimeout(() => {
+                document.getElementById('error-message').style.display = 'none';
+            }, 5000); // Hide after 5 seconds
+        }
 
         // Function to initialize the 3D scene
         function init() {
-            // Hide loading overlay
-            document.getElementById('loading-overlay').style.display = 'none';
-            document.getElementById('point-count').innerText = NUM_POINTS.toLocaleString();
+            setLoading(false); // Hide initial loading overlay
+            document.getElementById('point-count').innerText = currentNumPoints.toLocaleString();
 
             // 1. Create the scene
             scene = new THREE.Scene();
@@ -107,10 +143,9 @@
                 75, // Field of view
                 window.innerWidth / window.innerHeight, // Aspect ratio
                 0.1, // Near clipping plane
-                1000 // Far clipping plane
+                10000 // Far clipping plane (increased for larger potential datasets)
             );
-            camera.position.z = MAX_COORD * 1.5; // Position camera relative to max coordinate
-            camera.position.y = MAX_COORD / 4;
+            // Camera position will be updated after data load
 
             // 3. Create the renderer
             renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -118,59 +153,20 @@
             renderer.setSize(window.innerWidth, window.innerHeight); // Set renderer size to full window
             document.body.appendChild(renderer.domElement); // Add renderer's canvas to the DOM
 
-            // 4. Generate and add a large number of points
-            const positions = new Float32Array(NUM_POINTS * 3); // 3 components (x, y, z) per point
-            const colors = new Float32Array(NUM_POINTS * 3); // 3 components (r, g, b) per point
-
-            // Simulate a sphere of points for better visual structure
-            const sphereRadius = MAX_COORD;
-            for (let i = 0; i < NUM_POINTS; i++) {
-                // Generate random points within a sphere
-                const theta = Math.random() * Math.PI * 2; // Azimuthal angle
-                const phi = Math.acos(Math.random() * 2 - 1); // Polar angle (distributes points evenly on sphere)
-                const r = sphereRadius * Math.random(); // Random radius within sphere
-
-                const x = r * Math.sin(phi) * Math.cos(theta);
-                const y = r * Math.sin(phi) * Math.sin(theta);
-                const z = r * Math.cos(phi);
-
-                positions[i * 3] = x;
-                positions[i * 3 + 1] = y;
-                positions[i * 3 + 2] = z;
-
-                // Assign random colors
-                colors[i * 3] = Math.random();     // R
-                colors[i * 3 + 1] = Math.random(); // G
-                colors[i * 3 + 2] = Math.random(); // B
-            }
-
-            const geometry = new THREE.BufferGeometry();
-            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-
-            // Create a material for the points
-            const material = new THREE.PointsMaterial({
-                size: 0.1, // Size of each point
-                vertexColors: true, // Use colors from the geometry
-                transparent: true,
-                opacity: 0.8,
-                sizeAttenuation: true // Points get smaller when further away
-            });
-
-            points = new THREE.Points(geometry, material);
-            scene.add(points);
-
             // 5. Add OrbitControls for interactive camera movement
             controls = new THREE.OrbitControls(camera, renderer.domElement);
             controls.enableDamping = true; // Enable smooth camera movement
             controls.dampingFactor = 0.05;
             controls.screenSpacePanning = false;
-            controls.minDistance = 1;
-            controls.maxDistance = MAX_COORD * 3; // Allow zooming out
+            controls.minDistance = 0.1; // Allow close zoom
+            controls.maxDistance = maxCoord * 5; // Adjust max zoom based on data extent
             controls.maxPolarAngle = Math.PI; // Allow full vertical rotation
 
             // Handle window resizing
             window.addEventListener('resize', onWindowResize, false);
+
+            // Initial render call to set up the scene even before points are loaded
+            animate();
         }
 
         // Function to handle window resizing
@@ -191,13 +187,111 @@
             renderer.render(scene, camera);
         }
 
-        // Start the animation on window load.
+        // Function to load and parse XYZ data from a file via fetch
+        async function loadPointsFromURL(url) {
+            setLoading(true, `Fetching ${url}...`);
+            try {
+                const response = await fetch(url);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const text = await response.text();
+                const lines = text.split('\n');
+                const positions = [];
+                const colors = [];
+                let minX = Infinity, minY = Infinity, minZ = Infinity;
+                let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+
+                for (let i = 0; i < lines.length; i++) {
+                    const line = lines[i].trim();
+                    if (line.length === 0 || line.startsWith('#')) continue; // Skip empty lines or comments
+
+                    // Split by space or comma
+                    const parts = line.split(/[\s,]+/).map(Number);
+
+                    if (parts.length >= 3 && !isNaN(parts[0]) && !isNaN(parts[1]) && !isNaN(parts[2])) {
+                        const x = parts[0];
+                        const y = parts[1];
+                        const z = parts[2];
+
+                        positions.push(x, y, z);
+
+                        // Update min/max for bounding box calculation
+                        minX = Math.min(minX, x);
+                        minY = Math.min(minY, y);
+                        minZ = Math.min(minZ, z);
+                        maxX = Math.max(maxX, x);
+                        maxY = Math.max(maxY, y);
+                        maxZ = Math.max(maxZ, z);
+
+                        // Assign random colors for now, can be extended to read RGB if available
+                        colors.push(Math.random(), Math.random(), Math.random());
+                    }
+                }
+
+                if (positions.length === 0) {
+                    showErrorMessage('No valid XYZ data found in the file.');
+                    setLoading(false);
+                    return;
+                }
+
+                currentNumPoints = positions.length / 3;
+                document.getElementById('point-count').innerText = currentNumPoints.toLocaleString();
+
+                // Calculate max coordinate extent for camera positioning
+                const extentX = maxX - minX;
+                const extentY = maxY - minY;
+                const extentZ = maxZ - minZ;
+                maxCoord = Math.max(extentX, extentY, extentZ) / 2; // Half of max dimension
+
+                // Clear previous points if any
+                if (points) {
+                    scene.remove(points);
+                    points.geometry.dispose();
+                    points.material.dispose();
+                }
+
+                // Create new geometry and material
+                const geometry = new THREE.BufferGeometry();
+                geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+                geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colors), 3));
+
+                const material = new THREE.PointsMaterial({
+                    size: 0.1, // Size of each point
+                    vertexColors: true, // Use colors from the geometry
+                    transparent: true,
+                    opacity: 0.8,
+                    sizeAttenuation: true // Points get smaller when further away
+                });
+
+                points = new THREE.Points(geometry, material);
+                scene.add(points);
+
+                // Reposition camera and controls based on loaded data
+                const center = new THREE.Vector3(
+                    (minX + maxX) / 2,
+                    (minY + maxY) / 2,
+                    (minZ + maxZ) / 2
+                );
+                camera.position.set(center.x + maxCoord * 1.5, center.y + maxCoord * 0.5, center.z + maxCoord * 1.5);
+                camera.lookAt(center);
+                controls.target.copy(center);
+                controls.maxDistance = maxCoord * 5;
+                controls.update();
+
+                setLoading(false);
+
+            } catch (error) {
+                console.error("Error loading or processing file:", error);
+                showErrorMessage(`Failed to load or process data: ${error.message}. Ensure '${DATA_FILE_PATH}' exists and is correctly formatted.`);
+                setLoading(false);
+            }
+        }
+
+        // Event listeners for file input
         window.onload = function () {
-            // Give a brief moment for the loading overlay to show before generating points
-            setTimeout(() => {
-                init();
-                animate();
-            }, 100); // Small delay
+            init(); // Initialize scene first
+            loadPointsFromURL(DATA_FILE_PATH); // Automatically load data from the specified file
         };
     </script>
 </body>
