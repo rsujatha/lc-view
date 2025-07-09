@@ -92,7 +92,7 @@
     </div>
 
     <script>
-        let scene, camera, renderer, controls, points, originPivotHelper; // Added originPivotHelper
+        let scene, camera, renderer, controls, points; 
         let currentNumPoints = 0;
         let maxCoord = 1; // Will be updated based on loaded data
         const DATA_FILE_PATH = 'points.xyz'; // The name of your data file in the same repository
@@ -274,13 +274,6 @@
                 controls.target.copy(center);
                 controls.maxDistance = maxCoord * 5;
                 controls.update();
-
-                // Adjust the size of the origin helper based on the loaded data's scale
-                // This makes it visually appropriate regardless of data scale
-                originPivotHelper.scale.setScalar(maxCoord / 10); // Adjust this factor (e.g., 10) as desired
-                // You might also make it slightly transparent if it's too dominant
-                // originPivotHelper.material.opacity = 0.7;
-                // originPivotHelper.material.transparent = true;
 
 
                 setLoading(false);
