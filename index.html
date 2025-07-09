@@ -149,12 +149,6 @@
             renderer.setSize(window.innerWidth, window.innerHeight); // Set renderer size to full window
             document.body.appendChild(renderer.domElement); // Add renderer's canvas to the DOM
 
-            // --- ADDITION: Create and add a visible pivot point at the origin ---
-            originPivotHelper = new THREE.Mesh(originGeometry, originMaterial);
-            originPivotHelper.position.set(0, 0, 0); // Position it at the origin
-            scene.add(originPivotHelper);
-            // ------------------------------------------------------------------
-
             // 5. Add OrbitControls for interactive camera movement
             controls = new THREE.OrbitControls(camera, renderer.domElement);
             controls.enableDamping = true; // Enable smooth camera movement
