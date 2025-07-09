@@ -269,7 +269,7 @@
                     (minY + maxY) / 2,
                     (minZ + maxZ) / 2
                 );
-                camera.position.set(center.x + maxCoord * 1.5, center.y + maxCoord * 0.5, center.z + maxCoord * 1.5);
+                camera.position.set(center.x + maxCoord * 0.5, center.y + maxCoord * 0.2, center.z + maxCoord * 0.5);
                 camera.lookAt(center);
                 controls.target.copy(center);
                 controls.maxDistance = maxCoord * 5;
