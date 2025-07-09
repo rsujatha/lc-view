@@ -150,8 +150,6 @@
             document.body.appendChild(renderer.domElement); // Add renderer's canvas to the DOM
 
             // --- ADDITION: Create and add a visible pivot point at the origin ---
-            const originGeometry = new THREE.SphereGeometry(0.5, 32, 32); // Adjust size as needed
-            const originMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 }); // Red color
             originPivotHelper = new THREE.Mesh(originGeometry, originMaterial);
             originPivotHelper.position.set(0, 0, 0); // Position it at the origin
             scene.add(originPivotHelper);
