@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3d Viewer</title>
+    <title>3D Viewer</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <style>
@@ -75,6 +75,14 @@
             font-weight: bold;
             margin-top: 10px;
             display: none; /* Hidden by default */
+            position: absolute; /* Position it above other elements */
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.9);
+            padding: 20px;
+            border-radius: 10px;
+            z-index: 101; /* Higher than loading-overlay */
         }
     </style>
 </head>
@@ -85,17 +93,24 @@
     </div>
 
     <div id="info-box">
-        <h3>H-alpha galaxies in a Lightcone Viewer</h3>
+        <h3>H-alpha galaxies in a Lightcone Viewer upto z=1.8</h3>
         <p>You can drag to rotate and scroll to zoom into the galaxies.</p>
-        <p>Number of galaxies: <span id="point-count">0</span></p>
+        <p>Total number of galaxies: <span id="point-count">0</span></p>
         <p>Ctnl+drag to translate or change the pivot point.</p>
     </div>
 
     <script>
-        let scene, camera, renderer, controls, points; 
+        let scene, camera, renderer, controls;
+        let pointClouds = []; // To store multiple point cloud objects
         let currentNumPoints = 0;
-        let maxCoord = 1; // Will be updated based on loaded data
-        const DATA_FILE_PATH = 'points.xyz'; // The name of your data file in the same repository
+        let overallMinX = Infinity, overallMinY = Infinity, overallMinZ = Infinity;
+        let overallMaxX = -Infinity, overallMaxY = -Infinity, overallMaxZ = -Infinity;
+
+        // Define file paths and colors for each dataset
+        const DATASETS = [
+            { path: 'points.xyz', color: [0.96, 0.87, 0.70] }, // Toned-down gold/wheat
+            { path: 'points1.xyz', color: [0.96, 0.87, 0.70] } // Toned-down gold/wheat
+        ];
 
         // Function to set loading overlay text and visibility
         function setLoading(isLoading, text = "Loading...") {
@@ -125,6 +140,22 @@
             }, 5000); // Hide after 5 seconds
         }
 
+        // Function to create a circular texture
+        function createCircleTexture(size) {
+            const canvas = document.createElement('canvas');
+            canvas.width = size;
+            canvas.height = size;
+            const context = canvas.getContext('2d');
+            context.beginPath();
+            context.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
+            context.fillStyle = '#ffffff'; // White circle
+            context.fill();
+            return new THREE.CanvasTexture(canvas);
+        }
+
+        // Global variable to store the circle texture (create once, reuse)
+        let circleTexture;
+
         // Function to initialize the 3D scene
         function init() {
             setLoading(false); // Hide initial loading overlay
@@ -141,7 +172,6 @@
                 0.1, // Near clipping plane
                 10000 // Far clipping plane (increased for larger potential datasets)
             );
-            // Camera position will be updated after data load
 
             // 3. Create the renderer
             renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -155,8 +185,10 @@
             controls.dampingFactor = 0.05;
             controls.screenSpacePanning = false;
             controls.minDistance = 0.1; // Allow close zoom
-            controls.maxDistance = maxCoord * 5; // Adjust max zoom based on data extent
             controls.maxPolarAngle = Math.PI; // Allow full vertical rotation
+
+            // Create the circle texture once
+            circleTexture = createCircleTexture(64); // Size of the texture (e.g., 64x64 pixels)
 
             // Handle window resizing
             window.addEventListener('resize', onWindowResize, false);
@@ -175,16 +207,17 @@
         // Animation loop
         function animate() {
             requestAnimationFrame(animate); // Request the next frame
-
-            // Update controls
-            controls.update();
-
-            // Render the scene
-            renderer.render(scene, camera);
+            controls.update(); // Update controls
+            renderer.render(scene, camera); // Render the scene
         }
 
-        // Function to load and parse XYZ data from a file via fetch
-        async function loadPointsFromURL(url) {
+        /**
+         * Loads and parses XYZ data from a file via fetch.
+         * @param {string} url - The URL of the .xyz file.
+         * @param {number[]} desiredColor - An RGB array [r, g, b] for the points (0-1).
+         * @returns {Promise<{positions: number[], minX: number, minY: number, minZ: number, maxX: number, maxY: number, maxZ: number}>} - The parsed data and its bounding box.
+         */
+        async function loadPointsFromFile(url, desiredColor) {
             setLoading(true, `Fetching ${url}...`);
             try {
                 const response = await fetch(url);
@@ -220,76 +253,106 @@
                         maxY = Math.max(maxY, y);
                         maxZ = Math.max(maxZ, z);
 
-                        // Assign a toned-down, light golden color (Wheat)
-                        colors.push(0.96, 0.87, 0.70); // R, G, B values for toned-down gold (0 to 1)
-
+                        // Assign the desired color
+                        colors.push(...desiredColor);
                     }
                 }
 
                 if (positions.length === 0) {
-                    showErrorMessage('No valid XYZ data found in the file.');
-                    setLoading(false);
-                    return;
+                    showErrorMessage(`No valid XYZ data found in ${url}.`);
+                    return { positions: [], minX, minY, minZ, maxX, maxY, maxZ };
                 }
 
-                currentNumPoints = positions.length / 3;
-                document.getElementById('point-count').innerText = currentNumPoints.toLocaleString();
+                return { positions, colors, minX, minY, minZ, maxX, maxY, maxZ };
 
-                // Calculate max coordinate extent for camera positioning
-                const extentX = maxX - minX;
-                const extentY = maxY - minY;
-                const extentZ = maxZ - minZ;
-                maxCoord = Math.max(extentX, extentY, extentZ) / 2; // Half of max dimension
+            } catch (error) {
+                console.error(`Error loading or processing file ${url}:`, error);
+                showErrorMessage(`Failed to load or process data from ${url}: ${error.message}. Ensure the file exists and is correctly formatted.`);
+                return null; // Return null on error
+            }
+        }
 
-                // Clear previous points if any
-                if (points) {
-                    scene.remove(points);
-                    points.geometry.dispose();
-                    points.material.dispose();
+        /**
+         * Creates a Three.js Points object and adds it to the scene.
+         * @param {number[]} positions - Array of x, y, z coordinates.
+         * @param {number[]} colors - Array of r, g, b color values.
+         */
+        function createAndAddPointCloud(positions, colors) {
+            if (positions.length === 0) return;
+
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+            geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colors), 3));
+
+            const material = new THREE.PointsMaterial({
+                size: 0.1, // Size of each point
+                vertexColors: true, // Use colors from the geometry
+                transparent: true,
+                opacity: 0.8,
+                sizeAttenuation: true, // Points get smaller when further away
+                map: circleTexture, // Use the circular texture
+                alphaTest: 0.1 // Discard pixels with alpha less than 0.1
+            });
+
+            const points = new THREE.Points(geometry, material);
+            scene.add(points);
+            pointClouds.push(points); // Add to our array of point clouds
+            currentNumPoints += positions.length / 3; // Update total count
+            document.getElementById('point-count').innerText = currentNumPoints.toLocaleString();
+        }
+
+        // Function to load all specified point clouds
+        async function loadAllPointClouds() {
+            let loadedData = [];
+            for (const dataset of DATASETS) {
+                const data = await loadPointsFromFile(dataset.path, dataset.color);
+                if (data) {
+                    loadedData.push(data);
+                    // Update overall bounding box
+                    overallMinX = Math.min(overallMinX, data.minX);
+                    overallMinY = Math.min(overallMinY, data.minY);
+                    overallMinZ = Math.min(overallMinZ, data.minZ);
+                    overallMaxX = Math.max(overallMaxX, data.maxX);
+                    overallMaxY = Math.max(overallMaxY, data.maxY);
+                    overallMaxZ = Math.max(overallMaxZ, data.maxZ);
                 }
+            }
 
-                // Create new geometry and material
-                const geometry = new THREE.BufferGeometry();
-                geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
-                geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colors), 3));
+            // Create and add point clouds to the scene
+            for (const data of loadedData) {
+                createAndAddPointCloud(data.positions, data.colors);
+            }
 
-                const material = new THREE.PointsMaterial({
-                    size: 0.1, // Size of each point
-                    vertexColors: true, // Use colors from the geometry
-                    transparent: true,
-                    opacity: 0.8,
-                    sizeAttenuation: true // Points get smaller when further away
-                });
+            // Reposition camera and controls based on all loaded data
+            if (currentNumPoints > 0) {
+                const extentX = overallMaxX - overallMinX;
+                const extentY = overallMaxY - overallMinY;
+                const extentZ = overallMaxZ - overallMinZ;
+                const maxExtent = Math.max(extentX, extentY, extentZ);
+                const maxCoord = maxExtent / 2; // Half of max dimension for camera distance
 
-                points = new THREE.Points(geometry, material);
-                scene.add(points);
-
-                // Reposition camera and controls based on loaded data
                 const center = new THREE.Vector3(
-                    (minX + maxX) / 2,
-                    (minY + maxY) / 2,
-                    (minZ + maxZ) / 2
+                    (overallMinX + overallMaxX) / 2,
+                    (overallMinY + overallMaxY) / 2,
+                    (overallMinZ + overallMaxZ) / 2
                 );
+
                 camera.position.set(center.x + maxCoord * 0.5, center.y + maxCoord * 0.2, center.z + maxCoord * 0.5);
                 camera.lookAt(center);
                 controls.target.copy(center);
-                controls.maxDistance = maxCoord * 5;
+                controls.maxDistance = maxCoord * 5; // Adjust max zoom based on data extent
                 controls.update();
-
-
-                setLoading(false);
-
-            } catch (error) {
-                console.error("Error loading or processing file:", error);
-                showErrorMessage(`Failed to load or process data: ${error.message}. Ensure '${DATA_FILE_PATH}' exists and is correctly formatted.`);
-                setLoading(false);
+            } else {
+                showErrorMessage('No point data loaded. Check console for errors.');
             }
+
+            setLoading(false);
         }
 
         // Event listeners for file input
         window.onload = function () {
             init(); // Initialize scene first
-            loadPointsFromURL(DATA_FILE_PATH); // Automatically load data from the specified file
+            loadAllPointClouds(); // Load all specified data files
         };
     </script>
 </body>
